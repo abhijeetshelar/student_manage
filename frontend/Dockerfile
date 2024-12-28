@@ -1,21 +1,35 @@
-# Stage 1: Build the React app
-FROM node:16-alpine AS build
+# Use node:16 as the base image
+FROM node:16
 
+# Set the working directory in the container
 WORKDIR /app
 
-# Copy the package.json file and install dependencies
-COPY package.json ./
-RUN npm install
+# Add `/app/node_modules/.bin` to $PATH
+ENV PATH /app/node_modules/.bin:$PATH
 
-# Copy the rest of the application and build the React app
-COPY . ./
-RUN npm run build
+# Install nginx and clean up unnecessary files to reduce image size
+RUN apt-get update && apt-get install -y nginx && \
+    rm -rf /var/lib/apt/lists/*
 
-# Stage 2: Set up Nginx to serve the React app
-FROM nginx:alpine AS nginx
+# Copy custom nginx configuration
+COPY nginx.conf /etc/nginx/sites-available/default
 
-# Copy the build output from the build stage into the Nginx container
-COPY --from=build /app/build /usr/share/nginx/html
+# Append 'daemon off' to nginx.conf to keep the process running in the foreground
+RUN echo "\ndaemon off;" >> /etc/nginx/nginx.conf
 
-# Expose port 80 for Nginx
+# Copy application files into the container
+COPY ./ /app/
+
+# Install app dependencies, build the app, and copy build output to nginx's web folder
+RUN yarn install && yarn build && \
+    cp -R build/* /var/www/html/
+
+# Forward nginx logs to Docker's standard output and error logs
+RUN ln -sf /dev/stdout /var/log/nginx/access.log && \
+    ln -sf /dev/stderr /var/log/nginx/error.log
+
+# Expose port 80 for nginx
 EXPOSE 80
+
+# Start nginx to serve the app
+CMD ["nginx"]
